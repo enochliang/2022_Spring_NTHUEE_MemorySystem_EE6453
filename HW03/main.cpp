@@ -17,7 +17,6 @@ typedef struct{
     int counter;// 0:idle, 1:the last busy cycle 
     bool row_hit;
     request req;
-    bool enable;
 }bank_state;
 
 class queue {
@@ -49,26 +48,34 @@ class queue {
         request pop(request req_in){
             return req_queue[--length];
         }
-        request extract(int index){// (length > index >= 0)
+        request get_req(int index){// (length > index >= 0)
             request tmp_req = req_queue[index];
+            return tmp_req;
+        }
+        void rm_req(int index){
             for(int i = index ; i < (length - 1) ; i++){
                 req_queue[i] = req_queue[i+1];
             }
             length--;
-            return tmp_req;
         }
-        int search_bank(int bank){
+        int FCFS_get_idx(int bank){
             
             for(int i = length - 1 ; i >= 0 ; i--){
                 if(req_queue[i].bank == bank){return i;}
             }
             return size;
         }
-        int search_bank_row(int bank,int row){
+        int FR_FCFS_get_idx(int bank,int row){
+            bool bank_match = 0;
+            int idx = size;
             for(int i = length - 1 ; i >= 0 ; i--){
+                if((req_queue[i].bank == bank) && !bank_match){
+                    idx = i;
+                    bank_match = 1;
+                }
                 if((req_queue[i].bank == bank) && (req_queue[i].row == row)){return i;}
             }
-            return size;
+            return idx;
         }
         int get_length(){
             return length;
@@ -134,140 +141,76 @@ int main(){
     bank_state banks[num_bank];// declare a set of banks.
     for(int i = 0; i < num_bank ; i++ ){// initializing state of banks
         banks[i].counter = 0;
-        banks[i].enable = false;
     }
 
-    switch(policy){
-        case 0://FCFS
-            while(1){
-                cout << setiosflags(ios::left) << setw(7) << sim_cycles;
-                
-                // whether to fetch a req into queue
-                if(!req_q.is_full() && (req_cnt != num_request)){
-                    cin >> req.serial_num >> req.thread_id >> req.bank >> req.row;
-                    req_cnt++;
-                    print_queuing_info(req);
-                    push_flag = 1;
-                }else{
-                    cout<< "                ";
-                    push_flag = 0;
-                }
+    int req_to_take_idx = size_queue;
+    bool rm_flag = 0;
+    while(1){
+        /* if(rm_flag){
+            req_q.rm_req(req_to_take_idx);
+            rm_flag = 0;
+        } */
 
-                // update banks info
-                if(!req_q.is_empty()){// if the queue is not empty
-                    for(int i = 0; i < num_bank ; i++ ){// Traversing all banks to find out idle bank(s).
-                        if(banks[i].counter == 0){
-                            int req_to_take_idx = req_q.search_bank(i);
-                            
-                            if(req_to_take_idx < size_queue){// there is a req can be take
-                                req_to_DRAM = req_q.extract(req_to_take_idx);
-                                if(req_to_DRAM.row == banks[i].req.row){
-                                    banks[i].counter = lat_rowhit;
-                                    banks[i].row_hit = true;
-                                }else{
-                                    banks[i].counter = lat_rowmiss;
-                                    banks[i].row_hit = false;
-                                }
-                                banks[i].req = req_to_DRAM;
-                            }
+        cout << setiosflags(ios::left) << setw(7) << sim_cycles;
+        
+        // whether to fetch a req into queue
+        if(!req_q.is_full() && (req_cnt != num_request)){
+            cin >> req.serial_num >> req.thread_id >> req.bank >> req.row;
+            req_cnt++;
+            print_queuing_info(req);
+            push_flag = 1;
+        }else{
+            cout<< "                ";
+            push_flag = 0;
+        }
+
+        // update banks info
+        if(!req_q.is_empty()){// if the queue is not empty
+            for(int i = 0; i < num_bank ; i++ ){// Traversing all banks to find out idle bank(s).
+                if(banks[i].counter == 0){
+                    if(policy == 0)req_to_take_idx = req_q.FCFS_get_idx(i);
+                    else if(policy == 1)req_to_take_idx = req_q.FR_FCFS_get_idx(i,banks[i].req.row);
+                    
+                    if(req_to_take_idx < size_queue){// there is a req can be take
+                        req_to_DRAM = req_q.get_req(req_to_take_idx);
+                        req_q.rm_req(req_to_take_idx);
+                        rm_flag = 1;
+                        if(req_to_DRAM.row == banks[i].req.row){
+                            banks[i].counter = lat_rowhit;
+                            banks[i].row_hit = true;
+                        }else{
+                            banks[i].counter = lat_rowmiss;
+                            banks[i].row_hit = false;
                         }
+                        banks[i].req = req_to_DRAM;
                     }
                 }
-
-                if(push_flag){
-                    req_q.push(req);
-                }
-                
-                print_banks_info(banks,num_bank,lat_rowhit,lat_rowmiss);
-                for(int i = 0; i < num_bank ; i++ ){
-                    if(banks[i].counter != 0){
-                        banks[i].counter--;
-                    }
-                }
-
-                sim_cycles++;
-
-                // whether the work finished.
-                for(int i = 0; i < num_bank ; i++ ){
-                    if(banks[i].counter == 0){
-                        idle_bank_cnt++;
-                    }
-                }
-                if(req_q.is_empty() && (idle_bank_cnt == num_bank)){break;}
-                else{idle_bank_cnt=0;}
             }
-        break;
-        case 1://FR-FCFS
-            while(1){
-                cout << setiosflags(ios::left) << setw(7) << sim_cycles;
-                
-                // whether to fetch a req into queue
-                if(!req_q.is_full() && (req_cnt != num_request)){
-                    cin >> req.serial_num >> req.thread_id >> req.bank >> req.row;
-                    req_cnt++;
-                    print_queuing_info(req);
-                    push_flag = 1;
-                }else{
-                    cout<< "                ";
-                    push_flag = 0;
-                }
+        }
 
-                // update banks info
-                if(!req_q.is_empty()){// if the queue is not empty
-                    for(int i = 0; i < num_bank ; i++ ){// Traversing all banks to find out idle bank(s).
-                        if(banks[i].counter == 0){
-                            int req_to_take_idx;
-                            if(banks[i].enable){
-                                req_to_take_idx = req_q.search_bank_row(i,banks[i].req.row);
-                                if(req_to_take_idx == size_queue){
-                                    req_to_take_idx = req_q.search_bank(i);
-                                }
-                            }else{
-                                req_to_take_idx = req_q.search_bank(i);
-                            }
-                            
-                            
-                            if(req_to_take_idx < size_queue){// there is a req can be take
-                                req_to_DRAM = req_q.extract(req_to_take_idx);
-                                banks[i].enable = true;
-                                if(req_to_DRAM.row == banks[i].req.row){
-                                    banks[i].counter = lat_rowhit;
-                                    banks[i].row_hit = true;
-                                }else{
-                                    banks[i].counter = lat_rowmiss;
-                                    banks[i].row_hit = false;
-                                }
-                                banks[i].req = req_to_DRAM;
-                            }
-                        }
-                    }
-                }
+        
 
-                if(push_flag){
-                    req_q.push(req);
-                }
-                
-                print_banks_info(banks,num_bank,lat_rowhit,lat_rowmiss);
-                for(int i = 0; i < num_bank ; i++ ){
-                    if(banks[i].counter != 0){
-                        banks[i].counter--;
-                    }
-                }
-
-                sim_cycles++;
-
-                // whether the work finished.
-                for(int i = 0; i < num_bank ; i++ ){
-                    if(banks[i].counter == 0){
-                        idle_bank_cnt++;
-                    }
-                }
-                if(req_q.is_empty() && (idle_bank_cnt == num_bank)){break;}
-                else{idle_bank_cnt=0;}
+        if(push_flag){
+            req_q.push(req);
+        }
+        
+        print_banks_info(banks,num_bank,lat_rowhit,lat_rowmiss);
+        for(int i = 0; i < num_bank ; i++ ){
+            if(banks[i].counter != 0){
+                banks[i].counter--;
             }
-        break;
-        case 2://PAR-BS
-        break;
+        }
+
+        sim_cycles++;
+
+        // whether the work finished.
+        for(int i = 0; i < num_bank ; i++ ){
+            if(banks[i].counter == 0){
+                idle_bank_cnt++;
+            }
+        }
+        if(req_q.is_empty() && (idle_bank_cnt == num_bank)){break;}
+        else{idle_bank_cnt=0;}
     }
 
     return 0;
